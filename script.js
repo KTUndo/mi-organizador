@@ -1,40 +1,246 @@
-:root {
-    --primary: #4a90e2;
-    --success: #27ae60;
-    --danger: #e74c3c;
-    --bg: #f4f7f6;
+// ========================================
+// CONFIGURACIÓN DE SUPABASE
+// ========================================
+// IMPORTANTE: Reemplaza estos valores con los de tu proyecto
+const SUPABASE_URL = 'https://opnqnffmwtlmrpoiguek.supabase.co/rest/v1/'
+const SUPABASE_ANON_KEY = 'sb_publishable_w15prroiYtWGE6b8IEs_OA_UeyyDHNL'
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+let currentUser = null
+
+// ========================================
+// AUTENTICACIÓN
+// ========================================
+
+// Verificar si hay usuario logueado al cargar la página
+async function checkUser() {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) {
+        currentUser = session.user
+        showApp()
+    } else {
+        showAuth()
+    }
 }
 
-body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg); margin: 0; padding: 20px; }
-.container { max-width: 800px; margin: auto; background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+// Manejar login y registro
+async function handleAuth(action) {
+    const email = document.getElementById('email').value
+    const password = document.getElementById('password').value
 
-h1, h2 { color: #333; text-align: center; }
+    if (!email || !password) {
+        alert('Omple tots els camps')
+        return
+    }
 
-/* Autenticación */
-.form-group-auth { display: flex; flex-direction: column; gap: 10px; max-width: 300px; margin: 0 auto 30px; }
-.auth-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    try {
+        if (action === 'register') {
+            const { data, error } = await supabase.auth.signUp({
+                email: email,
+                password: password
+            })
+            if (error) throw error
+            alert('Compte creat! Comprova el teu correu per confirmar.')
+        } else {
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email: email,
+                password: password
+            })
+            if (error) throw error
+            currentUser = data.user
+            showApp()
+        }
+    } catch (error) {
+        alert('Error: ' + error.message)
+    }
+}
 
-/* App Header */
-.header-app { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
-.btn-logout { background: transparent; color: var(--danger); border: 1px solid var(--danger); padding: 5px 10px; border-radius: 4px; }
+// Cerrar sesión
+async function logout() {
+    await supabase.auth.signOut()
+    currentUser = null
+    showAuth()
+}
 
-/* Form Tasques */
-.form-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
-input, select, button { padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 16px; }
+// Mostrar sección de autenticación
+function showAuth() {
+    document.getElementById('auth-section').style.display = 'block'
+    document.getElementById('main-app').style.display = 'none'
+    document.getElementById('email').value = ''
+    document.getElementById('password').value = ''
+}
 
-.btn-add { background-color: var(--primary); color: white; grid-column: span 2; }
+// Mostrar aplicación principal
+function showApp() {
+    document.getElementById('auth-section').style.display = 'none'
+    document.getElementById('main-app').style.display = 'block'
+    document.getElementById('user-display').textContent = currentUser.email
+    loadTasks()
+}
 
-/* Llista */
-.task-list { list-style: none; padding: 0; }
-.task-item { display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid #eee; }
-.task-item.completed { opacity: 0.5; background: #f9f9f9; }
-.task-item.completed strong { text-decoration: line-through; }
+// ========================================
+// GESTIÓN DE TAREAS
+// ========================================
 
-.info { display: flex; flex-direction: column; }
-.badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; color: white; width: fit-content; margin-bottom: 4px; }
-.badge-deure { background: #f39c12; }
-.badge-treball { background: #9b59b6; }
-.badge-examen { background: var(--danger); }
+// Cargar todas las tareas del usuario
+async function loadTasks() {
+    try {
+        const { data: tasks, error } = await supabase
+            .from('Tasca')
+            .select(`
+                id,
+                Titol,
+                Completada,
+                fk_tipo,
+                fk_recordatori,
+                Tipo (
+                    Tipo
+                ),
+                Recordatori (
+                    fecha_fin
+                )
+            `)
+            .eq('fk_usuario', currentUser.id)
+            .order('id', { ascending: false })
 
-.btn-done { background: var(--success); color: white; }
-.btn-del { background: #eee; color: #333; border: 1px solid #ddd; }
+        if (error) throw error
+
+        renderTasks(tasks || [])
+    } catch (error) {
+        console.error('Error carregant tasques:', error)
+        alert('Error carregant les tasques')
+    }
+}
+
+// Renderizar lista de tareas
+function renderTasks(tasks) {
+    const taskList = document.getElementById('task-list')
+    taskList.innerHTML = ''
+
+    if (tasks.length === 0) {
+        taskList.innerHTML = '<li style="text-align:center; padding:20px; color:#999;">No hi ha tasques encara</li>'
+        return
+    }
+
+    tasks.forEach(task => {
+        const li = document.createElement('li')
+        li.className = `task-item ${task.Completada ? 'completed' : ''}`
+
+        const tipo = task.Tipo?.Tipo || 'general'
+        const fecha = task.Recordatori?.fecha_fin ? new Date(task.Recordatori.fecha_fin).toLocaleDateString('ca-ES') : 'Sense data'
+
+        li.innerHTML = `
+            <div class="info">
+                <span class="badge badge-${tipo.toLowerCase()}">${tipo}</span>
+                <strong>${task.Titol}</strong>
+                <small style="color:#888;">📅 ${fecha}</small>
+            </div>
+            <div style="display:flex;gap:8px;">
+                ${!task.Completada ? `<button class="btn-done" onclick="toggleTask(${task.id}, true)">✓</button>` : ''}
+                <button class="btn-del" onclick="deleteTask(${task.id})">🗑️</button>
+            </div>
+        `
+        taskList.appendChild(li)
+    })
+}
+
+// Añadir nueva tarea
+async function addTask() {
+    const taskName = document.getElementById('task-name').value
+    const taskType = document.getElementById('task-type').value
+    const taskDate = document.getElementById('task-date').value
+
+    if (!taskName) {
+        alert('Escriu un nom per la tasca')
+        return
+    }
+
+    try {
+        // 1. Crear el recordatorio si hay fecha
+        let recordatoriId = null
+        if (taskDate) {
+            const { data: recordatori, error: recError } = await supabase
+                .from('Recordatori')
+                .insert({
+                    fecha_inicio: taskDate,
+                    fecha_fin: taskDate
+                })
+                .select()
+                .single()
+
+            if (recError) throw recError
+            recordatoriId = recordatori.id
+        }
+
+        // 2. Obtener el ID del tipo
+        const { data: tipos, error: tipoError } = await supabase
+            .from('Tipo')
+            .select('id, Tipo')
+            .ilike('Tipo', taskType)
+            .single()
+
+        if (tipoError) throw tipoError
+
+        // 3. Crear la tarea
+        const { error: taskError } = await supabase
+            .from('Tasca')
+            .insert({
+                Titol: taskName,
+                Completada: false,
+                fk_usuario: currentUser.id,
+                fk_tipo: tipos.id,
+                fk_recordatori: recordatoriId
+            })
+
+        if (taskError) throw taskError
+
+        // Limpiar formulario y recargar
+        document.getElementById('task-name').value = ''
+        document.getElementById('task-date').value = ''
+        loadTasks()
+
+    } catch (error) {
+        console.error('Error afegint tasca:', error)
+        alert('Error afegint la tasca: ' + error.message)
+    }
+}
+
+// Marcar tarea como completada
+async function toggleTask(taskId, completed) {
+    try {
+        const { error } = await supabase
+            .from('Tasca')
+            .update({ Completada: completed })
+            .eq('id', taskId)
+
+        if (error) throw error
+        loadTasks()
+    } catch (error) {
+        console.error('Error actualitzant tasca:', error)
+    }
+}
+
+// Eliminar tarea
+async function deleteTask(taskId) {
+    if (!confirm('Segur que vols eliminar aquesta tasca?')) return
+
+    try {
+        const { error } = await supabase
+            .from('Tasca')
+            .delete()
+            .eq('id', taskId)
+
+        if (error) throw error
+        loadTasks()
+    } catch (error) {
+        console.error('Error eliminant tasca:', error)
+    }
+}
+
+// ========================================
+// INICIALIZACIÓN
+// ========================================
+
+// Verificar usuario al cargar la página
+checkUser()
